@@ -57,6 +57,19 @@ static int C2Di_GlyphComp(const void* _g1, const void* _g2)
 	return ret;
 }
 
+static void fillSheet(C3D_Tex *tex, void *data, TGLP_s *glyphInfo)
+{
+	tex->data     = data;
+	tex->fmt      = glyphInfo->sheetFmt;
+	tex->size     = glyphInfo->sheetSize;
+	tex->width    = glyphInfo->sheetWidth;
+	tex->height   = glyphInfo->sheetHeight;
+	tex->param    = GPU_TEXTURE_MAG_FILTER(GPU_LINEAR) | GPU_TEXTURE_MIN_FILTER(GPU_LINEAR)
+		| GPU_TEXTURE_WRAP_S(GPU_CLAMP_TO_EDGE) | GPU_TEXTURE_WRAP_T(GPU_CLAMP_TO_EDGE);
+	tex->border   = 0;
+	tex->lodParam = 0;
+}
+
 static void C2Di_TextEnsureLoad(void)
 {
 	// Skip if already loaded
@@ -70,24 +83,32 @@ static void C2Di_TextEnsureLoad(void)
 	// Load the glyph texture sheets
 	CFNT_s* font = fontGetSystemFont();
 	TGLP_s* glyphInfo = fontGetGlyphInfo(font);
-	s_glyphSheets = malloc(sizeof(C3D_Tex)*glyphInfo->nSheets);
-	s_textScale = 30.0f / glyphInfo->cellHeight;
+
+	// The way TGLP_s is set up, all of a font's texture sheets are adjacent in memory and have the same size. We can
+	// reinterpet the memory to describe a smaller set of much taller textures if we'd like. If we choose the right size,
+	// we can get all of the ASCII glyphs under a single texture, which will massively improve performance by reducing
+	// texture swaps within a piece of all-English text down to 0! We don't need any extra linear allocating to do this!
+	u32 numSheetsBig   = glyphInfo->nSheets / SHEETS_PER_BIG_SHEET;
+	u32 numSheetsSmall = glyphInfo->nSheets % SHEETS_PER_BIG_SHEET;
+	u32 numSheetsTotal = numSheetsBig + numSheetsSmall;
+	g_numFontSheetsCombined = glyphInfo->nSheets - numSheetsSmall;
+
+	s_glyphSheets = malloc(sizeof(C3D_Tex)*numSheetsTotal);
 	if (!s_glyphSheets)
 		svcBreak(USERBREAK_PANIC);
-
-	int i;
-	for (i = 0; i < glyphInfo->nSheets; i ++)
+	memset(s_glyphSheets, 0, sizeof(sizeof(C3D_Tex)*numSheetsTotal));
+	s_textScale = 30.0f / glyphInfo->cellHeight;
+	for (u32 i = 0; i < numSheetsBig; i++)
 	{
 		C3D_Tex* tex = &s_glyphSheets[i];
-		tex->data = fontGetGlyphSheetTex(font, i);
-		tex->fmt = glyphInfo->sheetFmt;
-		tex->size = glyphInfo->sheetSize;
-		tex->width = glyphInfo->sheetWidth;
-		tex->height = glyphInfo->sheetHeight;
-		tex->param = GPU_TEXTURE_MAG_FILTER(GPU_LINEAR) | GPU_TEXTURE_MIN_FILTER(GPU_LINEAR)
-			| GPU_TEXTURE_WRAP_S(GPU_CLAMP_TO_BORDER) | GPU_TEXTURE_WRAP_T(GPU_CLAMP_TO_BORDER);
-		tex->border = 0;
-		tex->lodParam = 0;
+		fillSheet(tex, fontGetGlyphSheetTex(font, i * SHEETS_PER_BIG_SHEET), glyphInfo);
+		tex->height = (uint16_t) (tex->height * SHEETS_PER_BIG_SHEET);
+		tex->size   = tex->size * SHEETS_PER_BIG_SHEET;
+	}
+
+	for (u32 i = 0; i < numSheetsSmall; i++)
+	{
+		fillSheet(&s_glyphSheets[numSheetsBig + i], fontGetGlyphSheetTex(font, numSheetsBig * SHEETS_PER_BIG_SHEET + i), glyphInfo);
 	}
 
 	// Initialize system font ASCII cache for C2D_FontCalcGlyphPosFromCodePoint

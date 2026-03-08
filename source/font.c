@@ -5,6 +5,7 @@
 #include <c2d/font.h>
 
 fontGlyphPos_s g_systemFontASCIICache[128];
+u32 g_numFontSheetsCombined;
 
 C2D_Font C2D_FontLoad(const char* filename)
 {
@@ -245,9 +246,27 @@ charWidthInfo_s* C2D_FontGetCharWidthInfo(C2D_Font font, int glyphIndex)
 void C2D_FontCalcGlyphPos(C2D_Font font, fontGlyphPos_s* out, int glyphIndex, u32 flags, float scaleX, float scaleY)
 {
 	if (!font)
+	{
 		fontCalcGlyphPos(out, fontGetSystemFont(), glyphIndex, flags, scaleX, scaleY);
+
+		if (out->sheetIndex < g_numFontSheetsCombined)
+		{
+			u32 indexWithinBigSheet = out->sheetIndex % SHEETS_PER_BIG_SHEET;
+			out->sheetIndex /= SHEETS_PER_BIG_SHEET;
+
+			// Readjust glyph UVs to account for being a part of the combined texture.
+			out->texcoord.top    = (out->texcoord.top    + (SHEETS_PER_BIG_SHEET - indexWithinBigSheet - 1)) / (float) SHEETS_PER_BIG_SHEET;
+			out->texcoord.bottom = (out->texcoord.bottom + (SHEETS_PER_BIG_SHEET - indexWithinBigSheet - 1)) / (float) SHEETS_PER_BIG_SHEET;
+		}
+		else
+		{
+			out->sheetIndex = out->sheetIndex - g_numFontSheetsCombined + g_numFontSheetsCombined / SHEETS_PER_BIG_SHEET;
+		}
+	}
 	else
+	{
 		fontCalcGlyphPos(out, font->cfnt, glyphIndex, flags, scaleX, scaleY);
+	}
 }
 
 void C2D_FontCalcGlyphPosFromCodePoint(C2D_Font font, fontGlyphPos_s* out, u32 codepoint, u32 flags, float scaleX, float scaleY)

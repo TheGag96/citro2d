@@ -122,3 +122,6 @@ void C2Di_Update(void);
 
 #define NUM_ASCII_CHARACTERS 128
 extern fontGlyphPos_s g_systemFontASCIICache[NUM_ASCII_CHARACTERS];
+
+#define SHEETS_PER_BIG_SHEET 32
+extern u32 g_numFontSheetsCombined;
