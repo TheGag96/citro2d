@@ -1,5 +1,6 @@
 #pragma once
 #include <c2d/base.h>
+#include <3ds/font.h>
 
 typedef struct
 {
@@ -77,6 +78,7 @@ struct C2D_Font_s
 	CFNT_s* cfnt;
 	C3D_Tex* glyphSheets;
 	float textScale;
+	fontGlyphPos_s asciiCache[128];
 };
 
 static inline C2Di_Context* C2Di_GetContext(void)
@@ -117,3 +119,6 @@ void C2Di_AppendQuad(void);
 void C2Di_AppendVtx(float x, float y, float z, float u, float v, float ptx, float pty, u32 color);
 void C2Di_FlushVtxBuf(void);
 void C2Di_Update(void);
+
+#define NUM_ASCII_CHARACTERS 128
+extern fontGlyphPos_s g_systemFontASCIICache[NUM_ASCII_CHARACTERS];

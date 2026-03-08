@@ -89,6 +89,13 @@ static void C2Di_TextEnsureLoad(void)
 		tex->border = 0;
 		tex->lodParam = 0;
 	}
+
+	// Initialize system font ASCII cache for C2D_FontCalcGlyphPosFromCodePoint
+	for (int i = 0; i < NUM_ASCII_CHARACTERS; i++)
+	{
+		// This will readjust glyph UVs to account for being a part of the combined texture.
+		C2D_FontCalcGlyphPos(NULL, &g_systemFontASCIICache[i], fontGlyphIndexFromCodePoint(font, i), 0, 1.0, 1.0);
+	}
 }
 
 C2D_TextBuf C2D_TextBufNew(size_t maxGlyphs)
@@ -161,7 +168,7 @@ const char* C2D_TextFontParseLine(C2D_Text* text, C2D_Font font, C2D_TextBuf buf
 		p += units;
 
 		fontGlyphPos_s glyphData;
-		C2D_FontCalcGlyphPos(font, &glyphData, C2D_FontGlyphIndexFromCodePoint(font, code), 0, 1.0f, 1.0f);
+		C2D_FontCalcGlyphPosFromCodePoint(font, &glyphData, code, 0, 1.0f, 1.0f);
 		if (glyphData.width > 0.0f)
 		{
 			C2Di_Glyph* glyph = &buf->glyphs[buf->glyphCount++];

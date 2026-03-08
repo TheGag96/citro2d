@@ -4,6 +4,8 @@
 #include "internal.h"
 #include <c2d/font.h>
 
+fontGlyphPos_s g_systemFontASCIICache[128];
+
 C2D_Font C2D_FontLoad(const char* filename)
 {
 	FILE* f = fopen(filename, "rb");
@@ -50,6 +52,11 @@ static C2D_Font C2Di_PostLoadFont(C2D_Font font)
 				| GPU_TEXTURE_WRAP_S(GPU_CLAMP_TO_BORDER) | GPU_TEXTURE_WRAP_T(GPU_CLAMP_TO_BORDER);
 			tex->border = 0;
 			tex->lodParam = 0;
+		}
+
+		for (i = 0; i < NUM_ASCII_CHARACTERS; i++)
+		{
+			fontCalcGlyphPos(&font->asciiCache[i], font->cfnt, fontGlyphIndexFromCodePoint(font->cfnt, i), 0, 1.0, 1.0);
 		}
 	}
 	return font;
@@ -241,6 +248,26 @@ void C2D_FontCalcGlyphPos(C2D_Font font, fontGlyphPos_s* out, int glyphIndex, u3
 		fontCalcGlyphPos(out, fontGetSystemFont(), glyphIndex, flags, scaleX, scaleY);
 	else
 		fontCalcGlyphPos(out, font->cfnt, glyphIndex, flags, scaleX, scaleY);
+}
+
+void C2D_FontCalcGlyphPosFromCodePoint(C2D_Font font, fontGlyphPos_s* out, u32 codepoint, u32 flags, float scaleX, float scaleY)
+{
+  // Building glyph positions is pretty expensive, but we could just store the results for plain ASCII.
+	if (codepoint < NUM_ASCII_CHARACTERS && flags == 0 && scaleX == 1 && scaleY == 1)
+	{
+		if (font)
+		{
+			*out = font->asciiCache[codepoint];
+		}
+		else
+		{
+			*out = g_systemFontASCIICache[codepoint];
+		}
+	}
+	else
+	{
+		C2D_FontCalcGlyphPos(font, out, C2D_FontGlyphIndexFromCodePoint(font, codepoint), 0, 1.0f, 1.0f);
+	}
 }
 
 FINF_s* C2D_FontGetInfo(C2D_Font font)
