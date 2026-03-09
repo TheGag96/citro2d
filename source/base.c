@@ -575,7 +575,7 @@ void C2Di_FlushVtxBuf(void)
 	ctx->idxBufLastPos = ctx->idxBufPos;
 }
 
-void C2Di_Update()
+void C2Di_Update(void)
 {
 	C2Di_Context* ctx = C2Di_GetContext();
 	u32 flags = ctx->flags & C2DiF_DirtyAny;
