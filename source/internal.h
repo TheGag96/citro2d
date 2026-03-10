@@ -1,5 +1,6 @@
 #pragma once
 #include <c2d/base.h>
+#include <c2d/font.h>
 #include <3ds/font.h>
 
 typedef struct
@@ -73,13 +74,16 @@ enum
 	C2DiF_DirtyAny = C2DiF_DirtyProj | C2DiF_DirtyMdlv | C2DiF_DirtyTex | C2DiF_DirtyMode | C2DiF_DirtyFade,
 };
 
-struct C2D_Font_s
+#define NUM_ASCII_CHARACTERS 128
+typedef struct C2D_Font_s
 {
 	CFNT_s* cfnt;
 	C3D_Tex* glyphSheets;
 	float textScale;
-	fontGlyphPos_s asciiCache[128];
-};
+	u32 numSheetsCombined;
+	u32 sheetsPerBigSheet;
+	fontGlyphPos_s asciiCache[NUM_ASCII_CHARACTERS];
+} C2D_Font_s;
 
 static inline C2Di_Context* C2Di_GetContext(void)
 {
@@ -120,8 +124,5 @@ void C2Di_AppendVtx(float x, float y, float z, float u, float v, float ptx, floa
 void C2Di_FlushVtxBuf(void);
 void C2Di_Update(void);
 
-#define NUM_ASCII_CHARACTERS 128
-extern fontGlyphPos_s g_systemFontASCIICache[NUM_ASCII_CHARACTERS];
-
-#define SHEETS_PER_BIG_SHEET 32
-extern u32 g_numFontSheetsCombined;
+extern C2D_Font_s g_systemFont;
+C2D_Font C2Di_LoadSystemFont(void);

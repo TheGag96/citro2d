@@ -4,8 +4,7 @@
 #include "internal.h"
 #include <c2d/font.h>
 
-fontGlyphPos_s g_systemFontASCIICache[128];
-u32 g_numFontSheetsCombined;
+C2D_Font_s g_systemFont;
 
 C2D_Font C2D_FontLoad(const char* filename)
 {
@@ -21,43 +20,72 @@ static inline C2D_Font C2Di_FontAlloc(void)
 	return (C2D_Font)malloc(sizeof(struct C2D_Font_s));
 }
 
+static void fillSheet(C3D_Tex *tex, void *data, TGLP_s *glyphInfo)
+{
+	tex->data     = data;
+	tex->fmt      = glyphInfo->sheetFmt;
+	tex->size     = glyphInfo->sheetSize;
+	tex->width    = glyphInfo->sheetWidth;
+	tex->height   = glyphInfo->sheetHeight;
+	tex->param    = GPU_TEXTURE_MAG_FILTER(GPU_LINEAR) | GPU_TEXTURE_MIN_FILTER(GPU_LINEAR)
+		| GPU_TEXTURE_WRAP_S(GPU_CLAMP_TO_EDGE) | GPU_TEXTURE_WRAP_T(GPU_CLAMP_TO_EDGE);
+	tex->border   = 0;
+	tex->lodParam = 0;
+}
+
 static C2D_Font C2Di_PostLoadFont(C2D_Font font)
 {
 	if (!font->cfnt)
 	{
 		free(font);
 		font = NULL;
-	} else
+	}
+	else
 	{
-		fontFixPointers(font->cfnt);
+		if (font->cfnt != fontGetSystemFont())
+		{
+			fontFixPointers(font->cfnt);
+		}
 
 		TGLP_s* glyphInfo = font->cfnt->finf.tglp;
-		font->glyphSheets = malloc(sizeof(C3D_Tex)*glyphInfo->nSheets);
 		font->textScale = 30.0f / glyphInfo->cellHeight;
+
+		// The way TGLP_s is set up, all of a font's texture sheets are adjacent in memory and have the same size. We can
+		// reinterpet the memory to describe a smaller set of much taller textures if we'd like. If we choose the right size,
+		// we can get all of the ASCII glyphs under a single texture, which will massively improve performance by reducing
+		// texture swaps within a piece of all-English text down to 0! We don't need any extra linear allocating to do this!
+		// Let's combine as many sheets as it takes to get to a big sheet height of 1024, which is the maximum height a
+		// texture can have.
+		font->sheetsPerBigSheet = 1024U / glyphInfo->sheetHeight;
+		u32 numSheetsBig   = glyphInfo->nSheets / font->sheetsPerBigSheet;
+		u32 numSheetsSmall = glyphInfo->nSheets % font->sheetsPerBigSheet;
+		u32 numSheetsTotal = numSheetsBig + numSheetsSmall;
+		font->numSheetsCombined = glyphInfo->nSheets - numSheetsSmall;
+
+		font->glyphSheets = malloc(sizeof(C3D_Tex)*numSheetsTotal);
 		if (!font->glyphSheets)
 		{
 			C2D_FontFree(font);
 			return NULL;
 		}
-
-		int i;
-		for (i = 0; i < glyphInfo->nSheets; i++)
+		memset(font->glyphSheets, 0, sizeof(sizeof(C3D_Tex)*numSheetsTotal));
+		for (u32 i = 0; i < numSheetsBig; i++)
 		{
 			C3D_Tex* tex = &font->glyphSheets[i];
-			tex->data = &glyphInfo->sheetData[glyphInfo->sheetSize*i];
-			tex->fmt = glyphInfo->sheetFmt;
-			tex->size = glyphInfo->sheetSize;
-			tex->width = glyphInfo->sheetWidth;
-			tex->height = glyphInfo->sheetHeight;
-			tex->param = GPU_TEXTURE_MAG_FILTER(GPU_LINEAR) | GPU_TEXTURE_MIN_FILTER(GPU_LINEAR)
-				| GPU_TEXTURE_WRAP_S(GPU_CLAMP_TO_BORDER) | GPU_TEXTURE_WRAP_T(GPU_CLAMP_TO_BORDER);
-			tex->border = 0;
-			tex->lodParam = 0;
+			fillSheet(tex, fontGetGlyphSheetTex(font->cfnt, i * font->sheetsPerBigSheet), glyphInfo);
+			tex->height = (uint16_t) (tex->height * font->sheetsPerBigSheet);
+			tex->size   = tex->size * font->sheetsPerBigSheet;
 		}
 
-		for (i = 0; i < NUM_ASCII_CHARACTERS; i++)
+		for (u32 i = 0; i < numSheetsSmall; i++)
 		{
-			fontCalcGlyphPos(&font->asciiCache[i], font->cfnt, fontGlyphIndexFromCodePoint(font->cfnt, i), 0, 1.0, 1.0);
+			fillSheet(&font->glyphSheets[numSheetsBig + i], fontGetGlyphSheetTex(font->cfnt, numSheetsBig * font->sheetsPerBigSheet + i), glyphInfo);
+		}
+
+		for (u32 i = 0; i < NUM_ASCII_CHARACTERS; i++)
+		{
+			// This will readjust glyph UVs to account for being a part of the combined texture.
+			C2D_FontCalcGlyphPos(NULL, &font->asciiCache[i], fontGlyphIndexFromCodePoint(font->cfnt, i), 0, 1.0, 1.0);
 		}
 	}
 	return font;
@@ -159,6 +187,13 @@ static C2D_Font C2Di_FontLoadFromArchive(u64 tid, const char* path)
 	return C2Di_PostLoadFont(font);
 }
 
+C2D_Font C2Di_LoadSystemFont(void)
+{
+	g_systemFont.cfnt = fontGetSystemFont();
+  C2Di_PostLoadFont(&g_systemFont);
+  return &g_systemFont;
+}
+
 static unsigned C2Di_RegionToFontIndex(CFG_Region region)
 {
 	switch (region)
@@ -204,7 +239,7 @@ C2D_Font C2D_FontLoadSystem(CFG_Region region)
 
 void C2D_FontFree(C2D_Font font)
 {
-	if (font)
+	if (font && font != &g_systemFont)
 	{
 		if (font->cfnt)
 			linearFree(font->cfnt);
@@ -214,7 +249,7 @@ void C2D_FontFree(C2D_Font font)
 
 void C2D_FontSetFilter(C2D_Font font, GPU_TEXTURE_FILTER_PARAM magFilter, GPU_TEXTURE_FILTER_PARAM minFilter)
 {
-	if (!font)
+	if (!font || font == &g_systemFont)
 		return;
 
 	TGLP_s* glyphInfo = font->cfnt->finf.tglp;
@@ -229,59 +264,44 @@ void C2D_FontSetFilter(C2D_Font font, GPU_TEXTURE_FILTER_PARAM magFilter, GPU_TE
 
 int C2D_FontGlyphIndexFromCodePoint(C2D_Font font, u32 codepoint)
 {
-	if (!font)
-		return fontGlyphIndexFromCodePoint(fontGetSystemFont(), codepoint);
-	else
-		return fontGlyphIndexFromCodePoint(font->cfnt, codepoint);
+	if (!font) font = &g_systemFont;
+	return fontGlyphIndexFromCodePoint(font->cfnt, codepoint);
 }
 
 charWidthInfo_s* C2D_FontGetCharWidthInfo(C2D_Font font, int glyphIndex)
 {
-	if (!font)
-		return fontGetCharWidthInfo(fontGetSystemFont(), glyphIndex);
-	else
-		return fontGetCharWidthInfo(font->cfnt, glyphIndex);
+	if (!font) font = &g_systemFont;
+	return fontGetCharWidthInfo(font->cfnt, glyphIndex);
 }
 
 void C2D_FontCalcGlyphPos(C2D_Font font, fontGlyphPos_s* out, int glyphIndex, u32 flags, float scaleX, float scaleY)
 {
-	if (!font)
+	if (!font) font = &g_systemFont;
+	fontCalcGlyphPos(out, font->cfnt, glyphIndex, flags, scaleX, scaleY);
+
+	if (out->sheetIndex < font->numSheetsCombined)
 	{
-		fontCalcGlyphPos(out, fontGetSystemFont(), glyphIndex, flags, scaleX, scaleY);
+		u32 indexWithinBigSheet = out->sheetIndex % font->sheetsPerBigSheet;
+		out->sheetIndex /= font->sheetsPerBigSheet;
 
-		if (out->sheetIndex < g_numFontSheetsCombined)
-		{
-			u32 indexWithinBigSheet = out->sheetIndex % SHEETS_PER_BIG_SHEET;
-			out->sheetIndex /= SHEETS_PER_BIG_SHEET;
-
-			// Readjust glyph UVs to account for being a part of the combined texture.
-			out->texcoord.top    = (out->texcoord.top    + (SHEETS_PER_BIG_SHEET - indexWithinBigSheet - 1)) / (float) SHEETS_PER_BIG_SHEET;
-			out->texcoord.bottom = (out->texcoord.bottom + (SHEETS_PER_BIG_SHEET - indexWithinBigSheet - 1)) / (float) SHEETS_PER_BIG_SHEET;
-		}
-		else
-		{
-			out->sheetIndex = out->sheetIndex - g_numFontSheetsCombined + g_numFontSheetsCombined / SHEETS_PER_BIG_SHEET;
-		}
+		// Readjust glyph UVs to account for being a part of the combined texture.
+		out->texcoord.top    = (out->texcoord.top    + (font->sheetsPerBigSheet - indexWithinBigSheet - 1)) / (float) font->sheetsPerBigSheet;
+		out->texcoord.bottom = (out->texcoord.bottom + (font->sheetsPerBigSheet - indexWithinBigSheet - 1)) / (float) font->sheetsPerBigSheet;
 	}
 	else
 	{
-		fontCalcGlyphPos(out, font->cfnt, glyphIndex, flags, scaleX, scaleY);
+		out->sheetIndex = out->sheetIndex - font->numSheetsCombined + font->numSheetsCombined / font->sheetsPerBigSheet;
 	}
 }
 
 void C2D_FontCalcGlyphPosFromCodePoint(C2D_Font font, fontGlyphPos_s* out, u32 codepoint, u32 flags, float scaleX, float scaleY)
 {
+	if (!font) font = &g_systemFont;
+
   // Building glyph positions is pretty expensive, but we could just store the results for plain ASCII.
 	if (codepoint < NUM_ASCII_CHARACTERS && flags == 0 && scaleX == 1 && scaleY == 1)
 	{
-		if (font)
-		{
-			*out = font->asciiCache[codepoint];
-		}
-		else
-		{
-			*out = g_systemFontASCIICache[codepoint];
-		}
+		*out = font->asciiCache[codepoint];
 	}
 	else
 	{
@@ -291,8 +311,6 @@ void C2D_FontCalcGlyphPosFromCodePoint(C2D_Font font, fontGlyphPos_s* out, u32 c
 
 FINF_s* C2D_FontGetInfo(C2D_Font font)
 {
-	if (!font)
-		return fontGetInfo(NULL);
-	else
-		return fontGetInfo(font->cfnt);
+	if (!font) font = &g_systemFont;
+	return fontGetInfo(font->cfnt);
 }
