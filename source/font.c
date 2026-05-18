@@ -190,8 +190,8 @@ static C2D_Font C2Di_FontLoadFromArchive(u64 tid, const char* path)
 C2D_Font C2Di_LoadSystemFont(void)
 {
 	g_systemFont.cfnt = fontGetSystemFont();
-  C2Di_PostLoadFont(&g_systemFont);
-  return &g_systemFont;
+	C2Di_PostLoadFont(&g_systemFont);
+	return &g_systemFont;
 }
 
 static unsigned C2Di_RegionToFontIndex(CFG_Region region)
@@ -298,7 +298,7 @@ void C2D_FontCalcGlyphPosFromCodePoint(C2D_Font font, fontGlyphPos_s* out, u32 c
 {
 	if (!font) font = &g_systemFont;
 
-  // Building glyph positions is pretty expensive, but we could just store the results for plain ASCII.
+	// Building glyph positions is pretty expensive, but we could just store the results for plain ASCII.
 	if (codepoint < NUM_ASCII_CHARACTERS && flags == 0 && scaleX == 1 && scaleY == 1)
 	{
 		*out = font->asciiCache[codepoint];
